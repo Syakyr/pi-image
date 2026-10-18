@@ -33,8 +33,10 @@ RUN apt-get update \
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent@${PI_VERSION} \
  && npm cache clean --force
 
-# Unprivileged user + writable linuxbrew prefix.
-RUN useradd -m -u 1000 -s /bin/bash pi \
+# The node base image already ships a uid/gid-1000 user "node"; rename it (and
+# its group + home) to "pi" rather than fighting "UID 1000 is not unique".
+RUN usermod -l pi -d /home/pi -m node \
+ && groupmod -o -n pi node \
  && mkdir -p /home/linuxbrew \
  && chown pi:pi /home/linuxbrew
 
