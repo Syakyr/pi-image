@@ -19,6 +19,37 @@ env:
   IMAGE: ghcr.io/${{ github.repository }}
 
 jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          tags: pi-smoke:local
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          # default path: drops to uid 1000, pi + brew on PATH
+          docker run --rm pi-smoke:local --version
+          docker run --rm --entrypoint bash pi-smoke:local -lc '
+            [ "$(id -u)" = 1000 ] || { echo "expected uid 1000, got $(id -u)"; exit 1; }
+            [ "$HOME" = /home/pi ] || { echo "HOME=$HOME"; exit 1; }
+            brew --version | head -1
+            command -v rg git gosu
+          '
+          # PUID/PGID remap path
+          docker run --rm -e PUID=1234 -e PGID=1234 --entrypoint bash pi-smoke:local -lc '
+            [ "$(id -u)" = 1234 ] || { echo "expected uid 1234, got $(id -u)"; exit 1; }
+            touch /home/pi/.remap-ok && echo remap ok
+          '
+          # --user path (already non-root)
+          docker run --rm --user 1000:1000 pi-smoke:local --version
+
   build:
     runs-on: ubuntu-latest
     steps:

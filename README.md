@@ -19,26 +19,53 @@ The pi npm version is pinned by the `ARG PI_VERSION` line in the [Dockerfile](Do
 
 ## Usage
 
+The container runs pi as an unprivileged user. Pass your host UID/GID with
+`PUID`/`PGID` so bind-mounted state is writable without root, mount your whole
+`~/.pi` (agent config, audit registry, memory store, guard state — everything
+pi keeps there), and give Linuxbrew a named volume so `brew install` persists:
+
 ```bash
-# Interactive TUI in the current folder
 docker run --rm -it \
-  -e ANTHROPIC_API_KEY \
+  -e PUID=$(id -u) -e PGID=$(id -g) \
+  -v ~/.pi:/home/pi/.pi \
+  -v pi-brew:/home/linuxbrew \
   -v "$PWD:/workspace" \
-  -v pi-agent-home:/root/.pi/agent \
+  --add-host=host.docker.internal:host-gateway \
   ghcr.io/syakyr/pi-image
 
 # One-off prompt
-docker run --rm -i \
-  -e ANTHROPIC_API_KEY \
+ echo "Create a snake game in python" | docker run --rm -i \
+  -e PUID=$(id -u) -e PGID=$(id -g) \
+  -v ~/.pi:/home/pi/.pi \
+  -v pi-brew:/home/linuxbrew \
   -v "$PWD:/workspace" \
-  ghcr.io/syakyr/pi-image "Create a snake game in python"
+  ghcr.io/syakyr/pi-image
 ```
 
-Replace `ANTHROPIC_API_KEY` with whichever provider credential you use. The named
-`pi-agent-home` volume persists settings, credentials and sessions between runs.
+Notes:
 
-Do **not** mount the host `~/.pi/agent` unless the container should have your host
-Pi configuration and credentials.
+- Credentials come from the mounted `~/.pi/agent` (auth.json / models.json), so
+  no `ANTHROPIC_API_KEY` env is needed if your provider config lives there.
+- `host.docker.internal` resolves to the host gateway (for a local llama-swap
+  endpoint); remote model endpoints in `models.json` just need network.
+- Without `PUID`/`PGID` the container still drops to uid 1000 — fine when your
+  host user *is* 1000 and the mount is owned by it.
+- After a UID change the entrypoint re-owns the brew volume once (one slow
+  start), then skips it. A bind-mounted `~/.pi` always keeps host ownership.
+- Inside the container, absolute paths baked into your config that point at the
+  host home (e.g. `/home/<you>/...`) won't resolve; workspace work happens under
+  `/workspace`.
+
+### Linuxbrew
+
+The image ships Linuxbrew at `/home/linuxbrew/.linuxbrew` (on `PATH`). With the
+`pi-brew` volume mounted it persists across runs — install extra CLIs on demand:
+
+```bash
+brew install fd fzf jq
+```
+
+`build-essential` is preinstalled so the occasional source build also works.
 
 ## Building locally
 
