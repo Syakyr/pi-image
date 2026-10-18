@@ -56,6 +56,23 @@ Notes:
   host home (e.g. `/home/<you>/...`) won't resolve; workspace work happens under
   `/workspace`.
 
+### Docker Compose
+
+The repo ships a `compose.yml` wrapping the same invocation:
+
+```bash
+# interactive TUI on the current folder (override with WORKSPACE=/some/dir)
+PUID=$(id -u) PGID=$(id -g) docker compose up
+
+# one-off prompt
+PUID=$(id -u) PGID=$(id -g) docker compose run --rm pi "Create a snake game in python"
+```
+
+It mounts `~/.pi` and a persistent `pi-brew` volume, defaults `PUID`/`PGID` to
+1000, and resolves `host.docker.internal` to the host gateway. `docker compose
+up` builds from the local Dockerfile if the image tag is absent; set
+`WORKSPACE` to choose what lands at `/workspace` (default: `./workspace`).
+
 ### Linuxbrew
 
 The image ships Linuxbrew at `/home/linuxbrew/.linuxbrew` (on `PATH`). With the

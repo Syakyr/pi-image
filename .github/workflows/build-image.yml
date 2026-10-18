@@ -49,6 +49,8 @@ jobs:
           '
           # --user path (already non-root)
           docker run --rm --user 1000:1000 pi-smoke:local --version
+          # compose file parses with the same interpolation we document
+          docker compose -f compose.yml config -q && echo "compose config ok"
 
   build:
     runs-on: ubuntu-latest

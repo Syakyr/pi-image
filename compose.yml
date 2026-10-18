@@ -1,0 +1,29 @@
+# Pi coding agent — interactive container.
+#
+#   PUID=$(id -u) PGID=$(id -g) docker compose up        # interactive TUI
+#   PUID=$(id -u) PGID=$(id -g) docker compose run --rm pi "your prompt"
+#
+# WORKSPACE selects the host folder mounted at /workspace (default: ./workspace
+# next to this file). ~/.pi carries your full pi state; pi-brew persists
+# Linuxbrew across runs.
+
+name: pi-image
+
+services:
+  pi:
+    image: ghcr.io/syakyr/pi-image:latest
+    build: .
+    stdin_open: true
+    tty: true
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+    volumes:
+      - ~/.pi:/home/pi/.pi
+      - pi-brew:/home/linuxbrew
+      - ${WORKSPACE:-./workspace}:/workspace
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  pi-brew:
