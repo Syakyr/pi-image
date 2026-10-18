@@ -43,12 +43,12 @@ RUN usermod -l pi -d /home/pi -m node \
 USER pi
 ENV HOME=/home/pi
 ENV CI=1
-RUN /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" \
- && brew --version
 ENV PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:${PATH}" \
     HOMEBREW_NO_AUTO_UPDATE=1 \
     HOMEBREW_NO_ENV_HINTS=1 \
     HOMEBREW_NO_INSTALL_CLEANUP=1
+RUN /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" \
+ && brew --version
 
 USER root
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
