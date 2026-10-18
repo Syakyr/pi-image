@@ -4,9 +4,12 @@
 #   PUID/PGID set (and running as root): remap the "pi" user to that uid/gid so
 #     bind-mounted host state (~/.pi) is writable without chowning host files.
 #   Neither set (running as root): just drop to the default pi user (uid 1000).
-#   Already non-root (--user ...): exec pi directly.
+#   Already non-root (--user ...): exec directly.
+#   First arg "bash" or "sh": drop privileges but exec the shell instead of pi
+#     (debugging / setup), e.g. `docker run -it <image> bash`.
 set -euo pipefail
 
+runas=()
 if [ "$(id -u)" = "0" ]; then
   if [ -n "${PUID:-}" ]; then
     groupmod -o -g "${PGID:-$PUID}" pi
@@ -26,7 +29,11 @@ if [ "$(id -u)" = "0" ]; then
     fi
   fi
   # gosu sets HOME/USER for the target uid, so pi finds ~/.pi correctly.
-  exec gosu "${PUID:-1000}:${PGID:-${PUID:-1000}}" pi "$@"
+  runas=(gosu "${PUID:-1000}:${PGID:-${PUID:-1000}}")
 fi
 
-exec pi "$@"
+case "${1:-}" in
+  bash|sh) exec "${runas[@]}" "$@" ;;
+esac
+
+exec "${runas[@]}" pi "$@"
