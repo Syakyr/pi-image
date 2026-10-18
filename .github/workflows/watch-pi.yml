@@ -1,0 +1,167 @@
+name: watch-pi
+
+# Watches earendil-works/pi for new v* tags and keeps this repo's Dockerfile
+# PI_VERSION pin on the newest upstream release. When the pinned version has no
+# image on GHCR yet, it dispatches build-image.yml explicitly.
+#
+# Two upstream-repo lessons carried over from halogen-timings-sidecar, both
+# verified against GitHub docs and that repo's run history:
+#
+#  1. api.github.com must be called AUTHENTICATED. An unauthenticated curl from
+#     a GitHub-hosted runner shares one tiny anonymous quota and routinely 403s.
+#     GITHUB_TOKEN gives a per-run 5000/hr budget; reading a public repo's tags
+#     needs no extra permission.
+#
+#  2. A commit/tag pushed with GITHUB_TOKEN does NOT trigger workflows ("other
+#     GITHUB_TOKEN-triggered events do not create workflow runs at all", except
+#     workflow_dispatch/repository_dispatch). So the chore bump commit alone
+#     would silently build nothing; we always dispatch build-image.yml
+#     ourselves when an image is missing.
+#
+# workflow_dispatch is also the escape hatch: run this manually to pin/build a
+# specific pi_version.
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      pi_version:
+        description: "Upstream pi version (blank = newest upstream tag)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write # push the "chore: pin pi" bump commit
+
+env:
+  UPSTREAM: earendil-works/pi
+
+jobs:
+  bump-and-build:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      INPUT_VERSION: ${{ inputs.pi_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Resolve upstream pi version
+        id: ver
+        run: |
+          set -euo pipefail
+
+          VERSION="${INPUT_VERSION:-}"
+          if [ -n "$VERSION" ]; then
+            echo "using manually requested pi version ${VERSION}"
+          else
+            body="$(mktemp)"
+            code="$(
+              curl -sS --retry 3 --retry-all-errors \
+                -o "$body" -w '%{http_code}' \
+                -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/${UPSTREAM}/tags?per_page=100"
+            )"
+            if [ "$code" != "200" ]; then
+              echo "::error::upstream tag list returned HTTP ${code}"
+              head -c 800 "$body" || true
+              exit 1
+            fi
+            # /tags order is not documented as semver-descending, so sort here
+            # rather than trusting index 0 (lexicographic order breaks at 0.9 -> 0.10).
+            VERSION="$(
+              python3 -c '
+          import json, re, sys
+          with open(sys.argv[1]) as fh:
+              tags = json.load(fh)
+          versions = [t["name"].lstrip("v") for t in tags
+                      if re.fullmatch(r"v?\d+\.\d+\.\d+", t["name"])]
+          if not versions:
+              sys.exit("no plain semver tags found upstream")
+          key = lambda v: [int(p) for p in v.split(".")]
+          print(max(versions, key=key))
+          ' "$body"
+            )"
+            echo "newest upstream pi: ${VERSION}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Sync Dockerfile pin
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.ver.outputs.version }}"
+          sed -i -E "s|^(ARG PI_VERSION=).*|\1${VERSION}|" Dockerfile
+          if git diff --quiet; then
+            echo "Dockerfile already pinned to ${VERSION}; nothing to sync"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -am "chore: pin pi to ${VERSION}"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+            echo "Dockerfile bumped to ${VERSION} (note: this push alone builds nothing; see dispatch step)"
+          fi
+
+      - name: Check image state on GHCR
+        id: state
+        run: |
+          set -euo pipefail
+          # A git tag/commit is not proof of a build. Probe GHCR for the exact
+          # immutable tag so a version whose build failed gets rebuilt on the
+          # next tick instead of being silently skipped forever. Anonymous pull
+          # token is enough here.
+          IMAGE="${{ github.repository }}"
+          IMAGE="$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')"
+          TAG="pi-${{ steps.ver.outputs.version }}"
+          PULL_TOKEN="$(
+            curl -sS --retry 3 --retry-all-errors \
+              "https://ghcr.io/token?scope=repository:${IMAGE}:pull" \
+              | python3 -c 'import json, sys; print(json.load(sys.stdin).get("token", ""))'
+          )"
+          if [ -z "$PULL_TOKEN" ]; then
+            echo "::error::could not obtain an anonymous GHCR pull token"
+            exit 1
+          fi
+          code="$(
+            curl -sS --retry 3 --retry-all-errors -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer ${PULL_TOKEN}" \
+              -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json' \
+              "https://ghcr.io/v2/${IMAGE}/manifests/${TAG}"
+          )"
+          case "$code" in
+            200) image_exists=yes ;;
+            404) image_exists=no ;;
+            *)
+              echo "::error::GHCR manifest probe returned HTTP ${code}; refusing to guess"
+              exit 1
+              ;;
+          esac
+          echo "image_exists=${image_exists}" >> "$GITHUB_OUTPUT"
+          echo "${TAG}: ghcr image=${image_exists}"
+
+      - name: Trigger build-image.yml
+        if: steps.state.outputs.image_exists == 'no'
+        run: |
+          set -euo pipefail
+          body="$(mktemp)"
+          code="$(
+            curl -sS --retry 3 --retry-all-errors \
+              -o "$body" -w '%{http_code}' \
+              -X POST \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${{ github.repository }}/actions/workflows/build-image.yml/dispatches" \
+              -d "{\"ref\":\"${{ github.ref }}\",\"inputs\":{\"pi_version\":\"${{ steps.ver.outputs.version }}\"}}"
+          )"
+          if [ "$code" != "204" ]; then
+            echo "::error::workflow_dispatch returned HTTP ${code}"
+            head -c 800 "$body" || true
+            exit 1
+          fi
+          echo "dispatched build-image.yml for pi ${{ steps.ver.outputs.version }}"
+
+      - name: Nothing to do
+        if: steps.state.outputs.image_exists == 'yes'
+        run: echo "pi-${{ steps.ver.outputs.version }} is already built; nothing to do"

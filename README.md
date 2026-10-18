@@ -50,8 +50,12 @@ docker build --build-arg PI_VERSION=1.3.0 -t pi-image .
 
 ## Updating pi
 
-Edit `ARG PI_VERSION=` in the Dockerfile and open a PR. Merging to `main`
-republishes `latest` and `pi-<version>`; tagging `vx.y.z` additionally publishes
-the semver tags.
+No manual bump needed: the `watch-pi` workflow runs every 6 hours, reads the
+newest `v*` tag from [earendil-works/pi](https://github.com/earendil-works/pi),
+commits a `chore: pin pi to <version>` bump to the Dockerfile, and dispatches
+`build-image.yml` if that version has no image on GHCR yet (a failed build is
+retried on the next tick). To pin/build a specific version immediately, run
+`watch-pi` manually with `pi_version` set. `build-image.yml` can also be run
+directly; its `pi_version` input overrides the Dockerfile pin for one build.
 
 Based on the official [Plain Docker pattern](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/containerization.md#plain-docker).
