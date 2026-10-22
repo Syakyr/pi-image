@@ -13,7 +13,7 @@
 FROM node:24-bookworm-slim
 
 # Pin the pi version; override at build time with --build-arg PI_VERSION=x.y.z
-ARG PI_VERSION=1.3.0
+ARG PI_VERSION=1.4.0
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
