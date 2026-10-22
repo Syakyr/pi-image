@@ -18,6 +18,11 @@ name: watch-pi
 #     would silently build nothing; we always dispatch build-image.yml
 #     ourselves when an image is missing.
 #
+#  3. workflow_dispatch needs the actions: write permission. With only
+#     contents: write the POST returns 403 "Resource not accessible by
+#     integration", which is what made every run after the pi 1.4.0 tag land
+#     fail: the pin commit pushed fine, the build did not trigger.
+#
 # workflow_dispatch is also the escape hatch: run this manually to pin/build a
 # specific pi_version.
 
@@ -33,6 +38,7 @@ on:
 
 permissions:
   contents: write # push the "chore: pin pi" bump commit
+  actions: write  # POST workflow_dispatch to build-image.yml (403 without it)
 
 env:
   UPSTREAM: earendil-works/pi
